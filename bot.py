@@ -26,6 +26,14 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 # ID do grupo fixo para onde tudo será enviado.
 GROUP_CHAT_ID = os.environ.get("TELEGRAM_GROUP_CHAT_ID")
 
+# Lista de IDs numéricos do Telegram autorizados a usar o bot, separados por
+# vírgula (ex: "111111111,222222222"). Descubra o ID de alguém mandando uma
+# mensagem para o bot @userinfobot.
+_usuarios_raw = os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "")
+USUARIOS_AUTORIZADOS = {
+    int(uid.strip()) for uid in _usuarios_raw.split(",") if uid.strip().isdigit()
+}
+
 URL_REGEX = re.compile(r"https?://\S+")
 
 HEADERS = {
@@ -37,6 +45,17 @@ HEADERS = {
 }
 
 CAPTION_LIMIT = 1024  # limite do Telegram para legenda de foto
+
+
+async def usuario_autorizado(update: Update) -> bool:
+    """Verifica se quem mandou a mensagem está na lista de autorizados.
+    Se não estiver, avisa e retorna False."""
+    user_id = update.effective_user.id if update.effective_user else None
+    if user_id in USUARIOS_AUTORIZADOS:
+        return True
+    await update.message.reply_text("Você não tem permissão para usar este bot.")
+    logger.info(f"Tentativa de uso bloqueada: user_id={user_id}")
+    return False
 
 # Estados das conversas
 LINK_AGUARDANDO_LINK = 1
@@ -174,6 +193,8 @@ CUPOM_AGUARDANDO_TEXTO = 10
 
 
 async def cupom_start_v2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await usuario_autorizado(update):
+        return ConversationHandler.END
     await update.message.reply_text(
         "Manda o texto do cupom (pode usar negrito, emojis etc — vou repassar exatamente como você escrever)."
     )
@@ -195,6 +216,8 @@ async def cupom_receber(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==== /link — link + preço, sem cupom ====
 
 async def link_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await usuario_autorizado(update):
+        return ConversationHandler.END
     await update.message.reply_text("Manda o link do produto.")
     return LINK_AGUARDANDO_LINK
 
@@ -228,6 +251,8 @@ async def link_receber_preco(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ==== /linkcupon — link + preço + cupom ====
 
 async def linkcupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await usuario_autorizado(update):
+        return ConversationHandler.END
     await update.message.reply_text("Manda o link do produto.")
     return LINKCUPON_AGUARDANDO_LINK
 
@@ -274,6 +299,8 @@ async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mensagem_sem_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await usuario_autorizado(update):
+        return
     await update.message.reply_text(
         "Use um comando para eu saber o que fazer:\n"
         "/link — link de produto + preço\n"
