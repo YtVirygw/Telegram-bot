@@ -3,7 +3,7 @@ import re
 import logging
 import requests
 from bs4 import BeautifulSoup
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -36,12 +36,23 @@ HEADERS = {
     )
 }
 
-# Estados usados pelas conversas de /cupom e /linkcupon
-AGUARDANDO_CUPOM_TEXTO = 1
-AGUARDANDO_LINK = 2
-AGUARDANDO_CUPOM_DO_LINK = 3
-
 CAPTION_LIMIT = 1024  # limite do Telegram para legenda de foto
+
+# Estados das conversas
+LINK_AGUARDANDO_LINK = 1
+LINK_AGUARDANDO_PRECO = 2
+
+LINKCUPON_AGUARDANDO_LINK = 3
+LINKCUPON_AGUARDANDO_PRECO = 4
+LINKCUPON_AGUARDANDO_CUPOM = 5
+
+# Lista de comandos exibida no menu "/" do Telegram
+COMANDOS = [
+    BotCommand("link", "Link de produto + preço"),
+    BotCommand("linkcupon", "Link de produto + preço + cupom"),
+    BotCommand("cupom", "Enviar um cupom (texto livre, sem link)"),
+    BotCommand("cancelar", "Cancelar o comando atual"),
+]
 
 
 # ==== EXTRAÇÃO DE METADADOS DA PÁGINA ====
@@ -55,14 +66,15 @@ def _find_meta_content(soup: BeautifulSoup, candidates: list[tuple[str, dict]]) 
     return None
 
 
-def extract_page_metadata(url: str) -> dict | None:
-    """Baixa a página e extrai imagem, título e descrição para preview."""
+def extract_page_metadata(url: str) -> dict:
+    """Baixa a página e extrai imagem e título. Nunca lança erro — se falhar,
+    retorna campos vazios e o bot segue sem imagem/título."""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
         resp.raise_for_status()
     except requests.RequestException as e:
         logger.warning(f"Falha ao baixar {url}: {e}")
-        return None
+        return {"image": None, "title": None}
 
     soup = BeautifulSoup(resp.text, "html.parser")
 
@@ -86,168 +98,192 @@ def extract_page_metadata(url: str) -> dict | None:
     if not title and soup.title and soup.title.string:
         title = soup.title.string.strip()
 
-    description = _find_meta_content(
-        soup,
-        [
-            ("meta", {"property": "og:description"}),
-            ("meta", {"name": "description"}),
-            ("meta", {"name": "twitter:description"}),
-        ],
-    )
-
-    return {"image": image, "title": title, "description": description}
+    return {"image": image, "title": title}
 
 
-def build_product_caption(title: str | None, description: str | None, cupom: str | None, url: str) -> str:
-    """Monta a legenda na ordem: título (se houver), descrição, cupom, link.
+def build_product_caption(title: str | None, preco: str, url: str, cupom: str | None = None) -> str:
+    """Monta a legenda na ordem: 🔥 título / Preço / Cupom (se houver) / Link / anúncio.
     O link nunca é alterado — é sempre o link original recebido (afiliado)."""
-    parts = []
-    if title:
-        parts.append(f"*{title}*")
-    if description:
-        parts.append(description)
-    if cupom:
-        parts.append(f"🎟️ Cupom: `{cupom}`")
-    parts.append(url)
+    linhas = []
 
-    caption = "\n\n".join(parts)
+    if title:
+        linhas.append(f"🔥 *{title}*")
+    else:
+        linhas.append("🔥")
+
+    linhas.append(f"*Preço:* R$ {preco}")
+
+    if cupom:
+        linhas.append(f"*Cupom:* {cupom}")
+
+    linhas.append(url)
+    linhas.append("anúncio")
+
+    caption = "\n\n".join(linhas)
     if len(caption) > CAPTION_LIMIT:
-        # Corta primeiro a descrição, nunca o link nem o cupom
-        overflow = len(caption) - CAPTION_LIMIT
-        if description:
-            nova_descricao = description[: max(0, len(description) - overflow - 3)] + "..."
-            parts_sem_desc = [p for p in parts if p != description]
-            idx = 1 if title else 0
-            parts_sem_desc.insert(idx, nova_descricao)
-            caption = "\n\n".join(parts_sem_desc)
-        else:
-            caption = caption[: CAPTION_LIMIT - 3] + "..."
+        caption = caption[: CAPTION_LIMIT - 3] + "..."
     return caption
 
 
-async def send_product_to_group(context: ContextTypes.DEFAULT_TYPE, url: str, cupom: str | None = None) -> bool:
-    """Extrai metadados do link e envia foto + descrição + cupom (opcional) + link pro grupo.
-    Retorna True se enviou com sucesso."""
+async def enviar_produto_para_grupo(
+    context: ContextTypes.DEFAULT_TYPE, url: str, preco: str, cupom: str | None = None
+):
+    """Extrai metadados do link e envia pro grupo: foto (se achar) + 🔥 título +
+    preço + cupom (se houver) + link + anúncio."""
     metadata = extract_page_metadata(url)
-
-    if not metadata or not metadata.get("image"):
-        return False
-
     caption = build_product_caption(
-        title=metadata.get("title"),
-        description=metadata.get("description"),
-        cupom=cupom,
-        url=url,
+        title=metadata.get("title"), preco=preco, url=url, cupom=cupom
     )
 
+    if metadata.get("image"):
+        try:
+            await context.bot.send_photo(
+                chat_id=GROUP_CHAT_ID,
+                photo=metadata["image"],
+                caption=caption,
+                parse_mode="Markdown",
+            )
+            return
+        except Exception as e:
+            logger.warning(f"Falha ao enviar foto com Markdown: {e}")
+            try:
+                caption_sem_formatacao = caption.replace("*", "")
+                await context.bot.send_photo(
+                    chat_id=GROUP_CHAT_ID,
+                    photo=metadata["image"],
+                    caption=caption_sem_formatacao,
+                )
+                return
+            except Exception as e2:
+                logger.warning(f"Falha ao enviar foto sem formatação, mandando só texto: {e2}")
+
+    # Sem imagem (não achou og:image ou falhou o envio da foto): manda só o texto
     try:
-        await context.bot.send_photo(
-            chat_id=GROUP_CHAT_ID,
-            photo=metadata["image"],
-            caption=caption,
-            parse_mode="Markdown",
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID, text=caption, parse_mode="Markdown"
         )
-    except Exception as e:
-        logger.warning(f"Falha com Markdown, tentando sem formatação: {e}")
-        # Remove os caracteres de formatação e tenta de novo, sem quebrar por causa deles
-        caption_sem_formatacao = caption.replace("*", "").replace("`", "")
-        await context.bot.send_photo(
-            chat_id=GROUP_CHAT_ID,
-            photo=metadata["image"],
-            caption=caption_sem_formatacao,
+    except Exception:
+        await context.bot.send_message(
+            chat_id=GROUP_CHAT_ID, text=caption.replace("*", "")
         )
-    return True
 
 
-# ==== FLUXO: LINK ENVIADO DIRETO (sem comando) ====
+# ==== /cupom — texto livre, preservando formatação, sem link ====
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text or ""
-    match = URL_REGEX.search(text)
-
-    if not match:
-        # Mensagem sem link e sem estar em nenhuma conversa: ignora ou orienta
-        await update.message.reply_text(
-            "Me manda um link de produto que eu envio pro grupo. "
-            "Ou use /cupom para mandar um cupom sem link, ou /linkcupon para link + cupom."
-        )
-        return
-
-    url = match.group(0)
-    await update.message.reply_text("Buscando informações do link...")
-
-    sucesso = await send_product_to_group(context, url)
-
-    if not sucesso:
-        await update.message.reply_text(
-            "Não consegui encontrar uma imagem nesse link. "
-            "O site pode não ter imagem de preview (og:image)."
-        )
-        return
-
-    await update.message.reply_text("Enviado para o grupo!")
+CUPOM_AGUARDANDO_TEXTO = 10
 
 
-# ==== FLUXO: /cupom (texto livre, sem link) ====
+async def cupom_start_v2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Manda o texto do cupom (pode usar negrito, emojis etc — vou repassar exatamente como você escrever)."
+    )
+    return CUPOM_AGUARDANDO_TEXTO
 
-async def cupom_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Beleza! Manda o texto do cupom que você quer publicar.")
-    return AGUARDANDO_CUPOM_TEXTO
 
-
-async def cupom_receber_texto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    texto = update.message.text
-    await context.bot.send_message(chat_id=GROUP_CHAT_ID, text=texto)
+async def cupom_receber(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # copy_message preserva formatação (negrito, itálico, emojis) e também
+    # funcionaria com foto/vídeo, se um dia você quiser mandar cupom com imagem.
+    await context.bot.copy_message(
+        chat_id=GROUP_CHAT_ID,
+        from_chat_id=update.effective_chat.id,
+        message_id=update.message.message_id,
+    )
     await update.message.reply_text("Enviado para o grupo!")
     return ConversationHandler.END
 
 
-# ==== FLUXO: /linkcupon (link + cupom separados) ====
+# ==== /link — link + preço, sem cupom ====
+
+async def link_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Manda o link do produto.")
+    return LINK_AGUARDANDO_LINK
+
+
+async def link_receber_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text or ""
+    match = URL_REGEX.search(text)
+    if not match:
+        await update.message.reply_text("Isso não parece um link. Manda o link do produto:")
+        return LINK_AGUARDANDO_LINK
+
+    context.user_data["link_url"] = match.group(0)
+    await update.message.reply_text("Agora manda o preço (ex: 153 ou 153,90).")
+    return LINK_AGUARDANDO_PRECO
+
+
+async def link_receber_preco(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    preco = update.message.text.strip()
+    url = context.user_data.pop("link_url", None)
+
+    if not url:
+        await update.message.reply_text("Algo deu errado, o link se perdeu. Use /link de novo.")
+        return ConversationHandler.END
+
+    await update.message.reply_text("Buscando informações do link...")
+    await enviar_produto_para_grupo(context, url, preco)
+    await update.message.reply_text("Enviado para o grupo!")
+    return ConversationHandler.END
+
+
+# ==== /linkcupon — link + preço + cupom ====
 
 async def linkcupon_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Manda o link do produto.")
-    return AGUARDANDO_LINK
+    return LINKCUPON_AGUARDANDO_LINK
 
 
 async def linkcupon_receber_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text or ""
     match = URL_REGEX.search(text)
-
     if not match:
         await update.message.reply_text("Isso não parece um link. Manda o link do produto:")
-        return AGUARDANDO_LINK
+        return LINKCUPON_AGUARDANDO_LINK
 
     context.user_data["linkcupon_url"] = match.group(0)
-    await update.message.reply_text("Beleza, agora manda o cupom.")
-    return AGUARDANDO_CUPOM_DO_LINK
+    await update.message.reply_text("Agora manda o preço (ex: 153 ou 153,90).")
+    return LINKCUPON_AGUARDANDO_PRECO
+
+
+async def linkcupon_receber_preco(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["linkcupon_preco"] = update.message.text.strip()
+    await update.message.reply_text("Agora manda o cupom.")
+    return LINKCUPON_AGUARDANDO_CUPOM
 
 
 async def linkcupon_receber_cupom(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cupom = update.message.text
+    cupom = update.message.text.strip()
     url = context.user_data.pop("linkcupon_url", None)
+    preco = context.user_data.pop("linkcupon_preco", None)
 
-    if not url:
-        await update.message.reply_text("Algo deu errado, o link se perdeu. Use /linkcupon de novo.")
+    if not url or not preco:
+        await update.message.reply_text("Algo deu errado no meio do caminho. Use /linkcupon de novo.")
         return ConversationHandler.END
 
     await update.message.reply_text("Buscando informações do link...")
-    sucesso = await send_product_to_group(context, url, cupom=cupom)
-
-    if not sucesso:
-        await update.message.reply_text(
-            "Não consegui encontrar uma imagem nesse link. "
-            "O site pode não ter imagem de preview (og:image)."
-        )
-        return ConversationHandler.END
-
+    await enviar_produto_para_grupo(context, url, preco, cupom=cupom)
     await update.message.reply_text("Enviado para o grupo!")
     return ConversationHandler.END
 
 
+# ==== Cancelar / fallback ====
+
 async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.pop("linkcupon_url", None)
+    context.user_data.clear()
     await update.message.reply_text("Cancelado.")
     return ConversationHandler.END
+
+
+async def mensagem_sem_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Use um comando para eu saber o que fazer:\n"
+        "/link — link de produto + preço\n"
+        "/linkcupon — link de produto + preço + cupom\n"
+        "/cupom — cupom em texto livre, sem link"
+    )
+
+
+async def pos_inicializacao(app: Application):
+    await app.bot.set_my_commands(COMANDOS)
 
 
 def main():
@@ -260,13 +296,26 @@ def main():
             "Defina a variável de ambiente TELEGRAM_GROUP_CHAT_ID com o id do grupo."
         )
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).post_init(pos_inicializacao).build()
 
     cupom_conv = ConversationHandler(
-        entry_points=[CommandHandler("cupom", cupom_start)],
+        entry_points=[CommandHandler("cupom", cupom_start_v2)],
         states={
-            AGUARDANDO_CUPOM_TEXTO: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cupom_receber_texto)
+            CUPOM_AGUARDANDO_TEXTO: [
+                MessageHandler(filters.ALL & ~filters.COMMAND, cupom_receber)
+            ],
+        },
+        fallbacks=[CommandHandler("cancelar", cancelar)],
+    )
+
+    link_conv = ConversationHandler(
+        entry_points=[CommandHandler("link", link_start)],
+        states={
+            LINK_AGUARDANDO_LINK: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, link_receber_link)
+            ],
+            LINK_AGUARDANDO_PRECO: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, link_receber_preco)
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
@@ -275,21 +324,23 @@ def main():
     linkcupon_conv = ConversationHandler(
         entry_points=[CommandHandler("linkcupon", linkcupon_start)],
         states={
-            AGUARDANDO_LINK: [
+            LINKCUPON_AGUARDANDO_LINK: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, linkcupon_receber_link)
             ],
-            AGUARDANDO_CUPOM_DO_LINK: [
+            LINKCUPON_AGUARDANDO_PRECO: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, linkcupon_receber_preco)
+            ],
+            LINKCUPON_AGUARDANDO_CUPOM: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, linkcupon_receber_cupom)
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
     )
 
-    # As conversas (/cupom e /linkcupon) precisam ser registradas ANTES do
-    # handler genérico de mensagens, senão ele "rouba" as respostas do usuário.
     app.add_handler(cupom_conv)
+    app.add_handler(link_conv)
     app.add_handler(linkcupon_conv)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mensagem_sem_comando))
 
     logger.info("Bot iniciado. Aguardando mensagens...")
     app.run_polling()

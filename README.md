@@ -1,24 +1,36 @@
 # Bot de Cupons e Links para Telegram
 
-O bot tem três formas de uso, todas enviando para o mesmo grupo fixo:
+O bot tem três comandos, todos enviando pro mesmo grupo fixo. Não existe
+mais envio automático por link solto — tudo passa por um comando.
 
-1. **Link direto** (sem comando) — manda qualquer link de produto no privado
-   e o bot já envia pro grupo: Foto → Descrição → Link.
-2. **`/cupom`** — o bot pergunta o texto do cupom e manda ele puro pro grupo
-   (sem link, sem foto).
-3. **`/linkcupon`** — o bot pergunta primeiro o link, depois o cupom, e envia
-   pro grupo: Foto → Descrição → Cupom → Link.
+## Comandos
 
-Em todos os casos com link, o **link nunca é alterado** (importante pra links
-afiliados) — ele é sempre repassado exatamente como você mandou.
+- **`/link`** — pergunta o link do produto, depois o preço. Envia pro grupo:
+  foto (se achar) + 🔥 título + Preço + link + "anúncio".
+- **`/linkcupon`** — pergunta o link, depois o preço, depois o cupom. Envia:
+  foto (se achar) + 🔥 título + Preço + Cupom + link + "anúncio".
+- **`/cupom`** — pergunta o texto do cupom. O que você mandar é repassado
+  **exatamente como escrito** pro grupo (negrito, emojis, links dentro do
+  texto — tudo preservado), sem exigir estrutura fixa. Ideal pra cupons com
+  várias categorias, como o formato de canais grandes.
+- **`/cancelar`** — cancela o comando em andamento a qualquer momento.
 
-## ⚠️ Antes de tudo: revogue o token antigo
+Em `/link` e `/linkcupon`, o **link do produto nunca é alterado** — é sempre
+repassado exatamente como você mandou (importante pra link afiliado).
 
-Você compartilhou um token em uma conversa anteriormente. Antes de usar este
-bot:
+## Menu de comandos no Telegram
+
+O bot registra os comandos automaticamente ao iniciar, então ao digitar `/`
+no chat com ele já aparece a lista com descrição — sem precisar configurar
+nada no @BotFather nem decorar os comandos.
+
+## ⚠️ Antes de tudo: revogue tokens antigos
+
+Se você já compartilhou um token em algum lugar que não devia (ex: aqui no
+chat), revogue antes de usar:
 
 1. Abra o @BotFather no Telegram
-2. Envie `/mybots` → selecione seu bot → **API Token** → **Revoke current token**
+2. `/mybots` → seu bot → **API Token** → **Revoke current token**
 3. Copie o novo token gerado
 
 Nunca cole o token direto em código ou em conversas. Use sempre variável de
@@ -32,20 +44,18 @@ pip install -r requirements.txt
 
 ## 2. Descobrir o chat_id do grupo
 
-1. Adicione o bot ao grupo desejado
-2. Envie qualquer mensagem no grupo
-3. Acesse no navegador (substituindo SEU_TOKEN):
-   `https://api.telegram.org/botSEU_TOKEN/getUpdates`
-4. Procure por `"chat":{"id":-100XXXXXXXXXX, ...}` — esse número (com o sinal
-   de menos) é o `GROUP_CHAT_ID`
+Opção mais simples pelo celular: abra **web.telegram.org** no navegador,
+entre no grupo, e veja o número na barra de endereço (ex:
+`web.telegram.org/a/#-1001234567890` → o chat_id é `-1001234567890`, com o
+sinal de menos).
 
 ## 3. Configurar variáveis de ambiente
 
-Crie um arquivo `.env` (ou exporte direto no terminal):
+No Railway (ou serviço equivalente), aba "Variables":
 
-```bash
-export TELEGRAM_BOT_TOKEN="seu_token_novo_aqui"
-export TELEGRAM_GROUP_CHAT_ID="-100XXXXXXXXXX"
+```
+TELEGRAM_BOT_TOKEN = seu_token_novo_aqui
+TELEGRAM_GROUP_CHAT_ID = -100XXXXXXXXXX
 ```
 
 ## 4. Rodar o bot
@@ -56,28 +66,15 @@ python bot.py
 
 ## 5. Testar
 
-No privado com o bot:
-
-- **Link direto:** mande um link de produto. O bot responde "Buscando
-  informações do link...", extrai a imagem e descrição, e envia pro grupo
-  na ordem Foto → Descrição → Link.
-- **`/cupom`:** o bot pergunta o texto do cupom. Depois que você responder,
-  ele manda esse texto puro pro grupo (sem link).
-- **`/linkcupon`:** o bot pergunta o link, depois o cupom. Depois de
-  responder os dois, ele envia pro grupo: Foto → Descrição → Cupom → Link.
-- Em qualquer uma das conversas (`/cupom` ou `/linkcupon`), pode usar
-  `/cancelar` para desistir no meio do caminho.
-
-## Hospedagem 24/7
-
-Para o bot ficar sempre ativo (sem precisar deixar seu computador ligado),
-hospede em um serviço como Railway, Render ou uma VPS simples. Nesses
-serviços, você configura as mesmas variáveis de ambiente (`TELEGRAM_BOT_TOKEN`
-e `TELEGRAM_GROUP_CHAT_ID`) no painel do serviço, sem precisar deixar o token
-no código.
+- `/link` → manda um link de produto → manda o preço → confere se chegou no
+  grupo com foto, título, preço e link.
+- `/linkcupon` → manda link → preço → cupom → confere a ordem no grupo.
+- `/cupom` → manda um texto com negrito/emoji → confere se chegou igualzinho
+  no grupo.
 
 ## Limitações conhecidas
 
-- Alguns sites bloqueiam requisições automatizadas (ex: exigem login ou têm
-  proteção anti-bot) — nesses casos a extração da imagem pode falhar.
-- Sites sem a tag `og:image` ou `twitter:image` não terão imagem encontrada.
+- Alguns sites bloqueiam requisições automatizadas (exigem login ou têm
+  proteção anti-bot) — nesses casos o bot manda só o texto, sem foto.
+- Sites sem a tag `og:image`/`og:title` podem não ter imagem ou título
+  encontrados; o bot ainda assim envia o restante das informações.
