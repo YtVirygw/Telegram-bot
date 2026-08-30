@@ -1,7 +1,16 @@
-# Bot de Link → Imagem para Telegram
+# Bot de Cupons e Links para Telegram
 
-Envie um link de site para o bot no privado. Ele extrai a imagem de capa
-(meta tag `og:image`) da página e envia a imagem + o link para um grupo fixo.
+O bot tem três formas de uso, todas enviando para o mesmo grupo fixo:
+
+1. **Link direto** (sem comando) — manda qualquer link de produto no privado
+   e o bot já envia pro grupo: Foto → Descrição → Link.
+2. **`/cupom`** — o bot pergunta o texto do cupom e manda ele puro pro grupo
+   (sem link, sem foto).
+3. **`/linkcupon`** — o bot pergunta primeiro o link, depois o cupom, e envia
+   pro grupo: Foto → Descrição → Cupom → Link.
+
+Em todos os casos com link, o **link nunca é alterado** (importante pra links
+afiliados) — ele é sempre repassado exatamente como você mandou.
 
 ## ⚠️ Antes de tudo: revogue o token antigo
 
@@ -47,11 +56,17 @@ python bot.py
 
 ## 5. Testar
 
-No privado com o bot, envie um link de uma página qualquer (ex: uma notícia,
-produto, post de blog). O bot vai:
-1. Responder "Buscando imagem do link..."
-2. Extrair a imagem `og:image` da página
-3. Enviar a imagem + link para o grupo configurado
+No privado com o bot:
+
+- **Link direto:** mande um link de produto. O bot responde "Buscando
+  informações do link...", extrai a imagem e descrição, e envia pro grupo
+  na ordem Foto → Descrição → Link.
+- **`/cupom`:** o bot pergunta o texto do cupom. Depois que você responder,
+  ele manda esse texto puro pro grupo (sem link).
+- **`/linkcupon`:** o bot pergunta o link, depois o cupom. Depois de
+  responder os dois, ele envia pro grupo: Foto → Descrição → Cupom → Link.
+- Em qualquer uma das conversas (`/cupom` ou `/linkcupon`), pode usar
+  `/cancelar` para desistir no meio do caminho.
 
 ## Hospedagem 24/7
 
