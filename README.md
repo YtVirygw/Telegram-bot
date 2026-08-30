@@ -7,13 +7,17 @@ mais envio automático por link solto — tudo passa por um comando.
 
 - **`/link`** — pergunta o link do produto, depois o preço. Envia pro grupo:
   foto (se achar) + 🔥 título + Preço + link + "anúncio".
-- **`/linkcupon`** — pergunta o link, depois o preço, depois o cupom. Envia:
-  foto (se achar) + 🔥 título + Preço + Cupom + link + "anúncio".
+- **`/linkcupom`** — pergunta o link, depois o preço, depois o cupom. Envia:
+  foto (se achar) + 🔥 título + Preço + Cupom + link + "anúncio". (O bot
+  também aceita `/linkcupon`, com "n", caso o autocorrect do celular troque
+  a grafia — mas o nome oficial no menu é `linkcupom`.)
 - **`/cupom`** — pergunta o texto do cupom. O que você mandar é repassado
   **exatamente como escrito** pro grupo (negrito, emojis, links dentro do
   texto — tudo preservado), sem exigir estrutura fixa. Ideal pra cupons com
   várias categorias, como o formato de canais grandes.
-- **`/cancelar`** — cancela o comando em andamento a qualquer momento.
+- **`/cancelar`** — cancela o comando em andamento a qualquer momento. Toda
+  conversa também expira sozinha depois de 5 minutos sem resposta, então o
+  bot nunca fica "travado" esperando pra sempre.
 
 Em `/link` e `/linkcupon`, o **link do produto nunca é alterado** — é sempre
 repassado exatamente como você mandou (importante pra link afiliado).
@@ -56,7 +60,17 @@ No Railway (ou serviço equivalente), aba "Variables":
 ```
 TELEGRAM_BOT_TOKEN = seu_token_novo_aqui
 TELEGRAM_GROUP_CHAT_ID = -100XXXXXXXXXX
+TELEGRAM_ALLOWED_USER_IDS = 111111111,222222222
 ```
+
+`TELEGRAM_ALLOWED_USER_IDS` é a lista de quem pode usar o bot — IDs
+numéricos do Telegram separados por vírgula, sem espaço. Quem não estiver
+nessa lista recebe "Você não tem permissão para usar este bot." e nada é
+enviado ao grupo.
+
+**Como descobrir o ID de alguém:** peça pra pessoa mandar uma mensagem para
+o bot **@userinfobot** — ele responde na hora com o ID numérico. Faça isso
+com o seu próprio usuário também, e inclua na lista.
 
 ## 4. Rodar o bot
 

@@ -68,7 +68,7 @@ LINKCUPON_AGUARDANDO_CUPOM = 5
 # Lista de comandos exibida no menu "/" do Telegram
 COMANDOS = [
     BotCommand("link", "Link de produto + preço"),
-    BotCommand("linkcupon", "Link de produto + preço + cupom"),
+    BotCommand("linkcupom", "Link de produto + preço + cupom"),
     BotCommand("cupom", "Enviar um cupom (texto livre, sem link)"),
     BotCommand("cancelar", "Cancelar o comando atual"),
 ]
@@ -281,7 +281,7 @@ async def linkcupon_receber_cupom(update: Update, context: ContextTypes.DEFAULT_
     preco = context.user_data.pop("linkcupon_preco", None)
 
     if not url or not preco:
-        await update.message.reply_text("Algo deu errado no meio do caminho. Use /linkcupon de novo.")
+        await update.message.reply_text("Algo deu errado no meio do caminho. Use /linkcupom de novo.")
         return ConversationHandler.END
 
     await update.message.reply_text("Buscando informações do link...")
@@ -304,7 +304,7 @@ async def mensagem_sem_comando(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         "Use um comando para eu saber o que fazer:\n"
         "/link — link de produto + preço\n"
-        "/linkcupon — link de produto + preço + cupom\n"
+        "/linkcupom — link de produto + preço + cupom\n"
         "/cupom — cupom em texto livre, sem link"
     )
 
@@ -333,6 +333,8 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     link_conv = ConversationHandler(
@@ -346,10 +348,12 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     linkcupon_conv = ConversationHandler(
-        entry_points=[CommandHandler("linkcupon", linkcupon_start)],
+        entry_points=[CommandHandler(["linkcupon", "linkcupom"], linkcupon_start)],
         states={
             LINKCUPON_AGUARDANDO_LINK: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, linkcupon_receber_link)
@@ -362,6 +366,8 @@ def main():
             ],
         },
         fallbacks=[CommandHandler("cancelar", cancelar)],
+        conversation_timeout=300,
+        allow_reentry=True,
     )
 
     app.add_handler(cupom_conv)
